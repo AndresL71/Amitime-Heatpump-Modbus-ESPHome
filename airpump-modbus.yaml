@@ -1,0 +1,1389 @@
+# file: airpump-modbus.yaml
+esphome:
+  name: airpump-modbus
+  friendly_name: AirPump Modbus
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_pass
+  ap:
+    ssid: "AirPump Fallback Hotspot"
+    password: "xxxxxxxx"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+api:
+  encryption:
+    key: !secret esphome_key
+
+ota:
+  - platform: esphome
+    password: !secret esphome_ota
+
+# =======================
+# RS-485 / Modbus RTU
+# =======================
+uart:
+  id: modbus_uart
+  tx_pin: GPIO27
+  rx_pin: GPIO14
+  baud_rate: 19200
+  parity: EVEN
+  stop_bits: 1
+
+modbus:
+  id: modbus1
+  uart_id: modbus_uart
+  flow_control_pin: GPIO4
+
+modbus_controller:
+  - id: hp
+    modbus_id: modbus1
+    address: 0x02
+    setup_priority: -10
+    command_throttle: 250ms
+    update_interval: 2s
+
+# =======================
+# SELECT
+# =======================
+select:
+  - platform: modbus_controller
+    name: "HP Working Mode"
+    id: hp_working_mode_select
+    modbus_controller_id: hp
+    address: 999     # Excel 1000 → bus 999
+    value_type: U_WORD
+    optimistic: true
+    optionsmap:
+      "Standby": 0
+      "Hot Water": 1
+      "Heating": 2
+      "Cooling": 3
+      "Auto": 4
+      "Hot Water + Heating": 5
+      "Hot Water + Cooling": 6
+      "Hot Water + Auto": 7
+
+# =======================
+# OUTPUT / BUTTON
+# =======================
+output:
+  - platform: modbus_controller
+    id: hp_eeprom_save_out
+    modbus_controller_id: hp
+    address: 1799    # Excel 1800
+    register_type: holding
+    value_type: U_WORD
+
+button:
+  - platform: template
+    name: "HP Save to EEPROM"
+    on_press:
+      - output.turn_on: hp_eeprom_save_out
+      - delay: 200ms
+      - output.turn_off: hp_eeprom_save_out
+      - component.update: hp
+
+# =======================
+# NUMBERS (todos unificados)
+# =======================
+number:
+  # Aux locales (no Modbus)
+  - platform: template
+    name: "HP Flow (L/s)"
+    id: hp_flow_lps
+    unit_of_measurement: "L/s"
+    optimistic: true
+    min_value: 0.50
+    max_value: 1.10
+    step: 0.01
+    initial_value: 0.92
+    icon: mdi:water
+
+  - platform: template
+    name: "HP Power Factor"
+    id: hp_power_factor
+    optimistic: true
+    min_value: 0.60
+    max_value: 1.00
+    step: 0.01
+    initial_value: 0.95
+    icon: mdi:sine-wave
+
+  # Setpoints directos
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP DHW Setpoint"
+    id: hp_dhw_setpoint
+    address: 1039
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 25
+    max_value: 75
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Setpoint"
+    id: hp_heating_setpoint
+    address: 1059
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 25
+    max_value: 75
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Setpoint"
+    id: hp_cooling_setpoint
+    address: 1089
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 7
+    max_value: 25
+    step: 1
+
+  # Parámetros simples (directos)
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP ∆T Compressor Speed Reduction"
+    id: hp_dt_compr_speed_reduction
+    address: 1002   # Excel 1003
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 2
+    max_value: 10
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Anti-freeze Deviation"
+    id: hp_cool_antifreeze_dev
+    address: 1003   # Excel 1004
+    value_type: U_WORD
+    min_value: 0
+    max_value: 5
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Max HP Operating Temp"
+    id: hp_max_operating_temp
+    address: 1005   # Excel 1006
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 50
+    max_value: 60
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Min HP Operating Temp"
+    id: hp_min_operating_temp
+    address: 1006   # Excel 1007
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 3
+    max_value: 10
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP External Signal Control"
+    id: hp_external_signal
+    address: 1007   # Excel 1008
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Water Flow Switch (s)"
+    id: hp_water_flow_switch_valid
+    address: 1008   # Excel 1009
+    value_type: U_WORD
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 60
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Circulation Pump Working Type"
+    id: hp_circ_pump_working_type
+    address: 1011   # Excel 1012
+    value_type: U_WORD
+    min_value: 0
+    max_value: 16
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Low Noise Mode"
+    id: hp_low_noise_mode_cfg
+    address: 1014   # Excel 1015
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Circulation Pump Stop N (min)"
+    id: hp_circ_pump_stop_n
+    address: 1015   # Excel 1016
+    value_type: U_WORD
+    unit_of_measurement: "min"
+    min_value: 0
+    max_value: 15
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Low Freq F1 Duration"
+    id: hp_lowfreq_f1_duration
+    address: 1016   # Excel 1017
+    value_type: U_WORD
+    unit_of_measurement: "min"
+    min_value: 10
+    max_value: 60
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Anti-Legionella Enable"
+    id: hp_antileg_enable
+    address: 1017   # Excel 1018
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Anti-Legionella Temp"
+    id: hp_antileg_temp
+    address: 1018   # Excel 1019
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 60
+    max_value: 75
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Anti-Legionella Duration"
+    id: hp_antileg_duration
+    address: 1019   # Excel 1020
+    value_type: U_WORD
+    unit_of_measurement: "min"
+    min_value: 10
+    max_value: 60
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Anti-Legionella Max Time"
+    id: hp_antileg_max_time
+    address: 1020   # Excel 1021
+    value_type: U_WORD
+    unit_of_measurement: "min"
+    min_value: 10
+    max_value: 240
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Anti-freeze Enable"
+    id: hp_antifreeze_enable
+    address: 1021   # Excel 1022
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  # Parámetros RAW (T*100+3000)
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Ambient Start AF#1 (raw)"
+    id: hp_amb_start_af1_raw
+    address: 1022   # Excel 1023
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Ambient Start AF#2 (raw)"
+    id: hp_amb_start_af2_raw
+    address: 1023   # Excel 1024
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Ambient Stop AF#2 (raw)"
+    id: hp_amb_stop_af2_raw
+    address: 1024   # Excel 1025
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Restart ∆T"
+    id: hp_heat_restart_dt
+    address: 1060   # Excel 1061
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 10
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Dual-Mode Priority (0=DHW,1=Heat)"
+    id: hp_dual_mode_priority
+    address: 1061   # Excel 1062
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Auto Heat Activ Ambient (raw)"
+    id: hp_auto_heat_activ_amb_raw
+    address: 1062   # Excel 1063
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Max Temp"
+    id: hp_heat_max_temp
+    address: 1063   # Excel 1064
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 65
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Emergency Start"
+    id: hp_heat_emergency_start
+    address: 1064   # Excel 1065
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Elec Heater Start Value"
+    id: hp_heat_elec_start_value
+    address: 1068   # Excel 1069
+    value_type: U_WORD
+    unit_of_measurement: "min·°C"
+    min_value: 0
+    max_value: 250
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP 3-Way Valve Heating End Config"
+    id: hp_3way_heat_end_cfg
+    address: 1071   # Excel 1072
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Shifting Priority Start Temp (raw)"
+    id: hp_shift_prio_start_temp_raw
+    address: 1072   # Excel 1073
+    value_type: U_WORD
+    min_value: 0
+    max_value: 65535
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Shifting Priority Heating ∆T"
+    id: hp_shift_prio_heat_dt
+    address: 1074   # Excel 1075
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 3
+    max_value: 20
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Shifting Priority Max Time"
+    id: hp_shift_prio_max_time
+    address: 1075   # Excel 1076
+    value_type: U_WORD
+    unit_of_measurement: "s"
+    min_value: 20
+    max_value: 180
+    step: 1
+
+  # Cooling curve (directo)
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Curve Enable"
+    id: hp_cooling_curve_enable
+    address: 1052   # Excel 1053
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Curve Ambient 1 (°C)"
+    id: hp_cool_curve_amb1
+    address: 1053   # Excel 1054
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 45
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Curve Water 1 (°C)"
+    id: hp_cool_curve_water1
+    address: 1054   # Excel 1055
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 7
+    max_value: 25
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Curve Ambient 2 (°C)"
+    id: hp_cool_curve_amb2
+    address: 1055   # Excel 1056
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 45
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Curve Water 2 (°C)"
+    id: hp_cool_curve_water2
+    address: 1056   # Excel 1057
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 7
+    max_value: 25
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Curve Ambient 3 (°C)"
+    id: hp_cool_curve_amb3
+    address: 1057   # Excel 1058
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 45
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Curve Water 3 (°C)"
+    id: hp_cool_curve_water3
+    address: 1058   # Excel 1059
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 7
+    max_value: 25
+    step: 1
+
+  # Heating curve (ambient RAW / water °C)
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Enable"
+    id: hp_heat_curve_enable
+    address: 1077   # Excel 1078
+    value_type: U_WORD
+    min_value: 0
+    max_value: 1
+    step: 1
+
+  # Ambient RAW (T*100+3000)
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Ambient 1 (raw)"
+    id: hp_heat_curve_amb1_raw
+    address: 1079   # Excel 1080
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Ambient 2 (raw)"
+    id: hp_heat_curve_amb2_raw
+    address: 1081   # Excel 1082
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Ambient 3 (raw)"
+    id: hp_heat_curve_amb3_raw
+    address: 1083   # Excel 1084
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Ambient 4 (raw)"
+    id: hp_heat_curve_amb4_raw
+    address: 1085   # Excel 1086
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Ambient 5 (raw)"
+    id: hp_heat_curve_amb5_raw
+    address: 1087   # Excel 1088
+    value_type: U_WORD
+    min_value: 2000
+    max_value: 8000
+    step: 1
+
+  # Water °C
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Water 1 (°C)"
+    id: hp_heat_curve_water1
+    address: 1080   # Excel 1081
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 65
+    step: 1
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Water 2 (°C)"
+    id: hp_heat_curve_water2
+    address: 1082   # Excel 1083
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 65
+    step: 1
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Water 3 (°C)"
+    id: hp_heat_curve_water3
+    address: 1084   # Excel 1085
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 65
+    step: 1
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Water 4 (°C)"
+    id: hp_heat_curve_water4
+    address: 1086   # Excel 1087
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 65
+    step: 1
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Heating Curve Water 5 (°C)"
+    id: hp_heat_curve_water5
+    address: 1088   # Excel 1089
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 20
+    max_value: 65
+    step: 1
+
+  # Cooling restart / Auto-cool
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Cooling Restart ∆T"
+    id: hp_cool_restart_dt
+    address: 1090   # Excel 1091
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 10
+    step: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: hp
+    name: "HP Auto Cool Activ Ambient (°C)"
+    id: hp_auto_cool_activ_amb
+    address: 1091   # Excel 1092
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    min_value: 21
+    max_value: 35
+    step: 1
+
+# =======================
+# SENSORS (unificado)
+# =======================
+sensor:
+  # Agua / Sistema (1200–1249). T = (raw-3000)/100
+  - platform: modbus_controller
+    name: "HP Outdoor Ambient Temp"
+    id: hp_outdoor_ambient_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1199
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP DHW Temperature"
+    id: hp_dhw_temp_run
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1200
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Cooling Water Temp (TH)"
+    id: hp_cooling_water_temp_th
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1201
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Outlet Water Temp"
+    id: hp_outlet_water_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1202
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Inlet Water Temp"
+    id: hp_inlet_water_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1203
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Inner Coil Temp"
+    id: hp_inner_coil_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1204
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Heating Water Temp"
+    id: hp_heating_water_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1205
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  # Refrigerant system (5100–5140)
+  - platform: modbus_controller
+    name: "HP Mode Raw"
+    id: hp_mode_raw
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5099
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    name: "HP AC Voltage"
+    id: hp_ac_voltage
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5100
+    value_type: U_WORD
+    unit_of_measurement: "V"
+
+  - platform: modbus_controller
+    name: "HP AC Current"
+    id: hp_ac_current
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5101
+    value_type: U_WORD
+    unit_of_measurement: "A"
+    accuracy_decimals: 1
+    lambda: 'return (float)x / 10.0f;'
+
+  - platform: modbus_controller
+    name: "HP Compressor Frequency Limit"
+    id: hp_compr_freq_limit
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5102
+    value_type: U_WORD
+    unit_of_measurement: "Hz"
+
+  - platform: modbus_controller
+    name: "HP Compressor Frequency"
+    id: hp_compr_freq
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5103
+    value_type: U_WORD
+    unit_of_measurement: "Hz"
+
+  - platform: modbus_controller
+    name: "HP DC Fan Speed Limit"
+    id: hp_fan_limit
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5104
+    value_type: U_WORD
+    unit_of_measurement: "rpm"
+
+  - platform: modbus_controller
+    name: "HP DC Fan 1 Speed"
+    id: hp_fan1_speed
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5105
+    value_type: U_WORD
+    unit_of_measurement: "rpm"
+
+  - platform: modbus_controller
+    name: "HP DC Fan 2 Speed"
+    id: hp_fan2_speed
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5106
+    value_type: U_WORD
+    unit_of_measurement: "rpm"
+
+  - platform: modbus_controller
+    name: "HP EEV Steps"
+    id: hp_eev_steps
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5107
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP Relay Feedback Raw"
+    id: hp_relay_feedback_raw
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5108
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP EVI Steps"
+    id: hp_evi_steps
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5109
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP Outdoor Ambient Temp (Refrig)"
+    id: hp_outdoor_temp_refrig
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5110
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Outdoor Evap Coil Temp"
+    id: hp_evap_coil_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5111
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Outdoor Gas Discharge Temp"
+    id: hp_gas_discharge_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5112
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Outdoor Gas Return Temp"
+    id: hp_gas_return_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5113
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Compressor Code"
+    id: hp_compressor_code
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5114
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP DIP & Pressure Switch Raw"
+    id: hp_dip_switches_raw
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5115
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP Evaporator Pressure (bar)"
+    id: hp_evap_pressure_bar
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5116
+    value_type: U_WORD
+    unit_of_measurement: "bar"
+    accuracy_decimals: 2
+    lambda: 'return (float)x / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Condenser Pressure (bar)"
+    id: hp_cond_pressure_bar
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5117
+    value_type: U_WORD
+    unit_of_measurement: "bar"
+    accuracy_decimals: 2
+    lambda: 'return (float)x / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Defrost Signal (raw)"
+    id: hp_defrost_signal_raw
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5118
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP Fail Prot 1 Raw"
+    id: hp_fail_prot1_raw
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5119
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP Fail Prot 2 Raw"
+    id: hp_fail_prot2_raw
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5120
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP Fail Prot 3 Raw"
+    id: hp_fail_prot3_raw
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5121
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP PCB SW Version"
+    id: hp_pcb_sw_version
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5122
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP PCB EEPROM Version"
+    id: hp_pcb_eeprom_version
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5123
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP Main Board Item No."
+    id: hp_main_board_item
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5127
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    name: "HP Economizer Outlet Temp"
+    id: hp_econ_outlet_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5128
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Economizer Inlet Temp"
+    id: hp_econ_inlet_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5129
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Condensing Temperature"
+    id: hp_condensing_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5131
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int16_t)x - 3000) / 100.0f;'
+
+  - platform: modbus_controller
+    name: "HP Evaporating Temperature"
+    id: hp_evaporating_temp
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5132
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    lambda: 'return ((int16_t)x - 3000) / 100.0f;'
+
+  # Derivados amigables desde RAW (no escriben Modbus)
+  - platform: template
+    name: "HP Ambient Start AF#1 (°C)"
+    id: hp_amb_start_af1_deg
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float raw = id(hp_amb_start_af1_raw).state;
+      if (isnan(raw)) return NAN;
+      return (raw - 3000.0f) / 100.0f;
+
+  - platform: template
+    name: "HP Ambient Start AF#2 (°C)"
+    id: hp_amb_start_af2_deg
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float raw = id(hp_amb_start_af2_raw).state;
+      if (isnan(raw)) return NAN;
+      return (raw - 3000.0f) / 100.0f;
+
+  - platform: template
+    name: "HP Ambient Stop AF#2 (°C)"
+    id: hp_amb_stop_af2_deg
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float raw = id(hp_amb_stop_af2_raw).state;
+      if (isnan(raw)) return NAN;
+      return (raw - 3000.0f) / 100.0f;
+
+  - platform: template
+    name: "HP Auto Heat Activ Ambient (°C)"
+    id: hp_auto_heat_activ_amb_deg
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float raw = id(hp_auto_heat_activ_amb_raw).state;
+      if (isnan(raw)) return NAN;
+      return (raw - 3000.0f) / 100.0f;
+
+  - platform: template
+    name: "HP Shifting Priority Start Temp (°C)"
+    id: hp_shift_prio_start_temp_deg
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float raw = id(hp_shift_prio_start_temp_raw).state;
+      if (isnan(raw) || raw == 65535.0f) return NAN;
+      return (raw - 3000.0f) / 100.0f;
+
+  # Cálculos
+  - platform: template
+    name: "HP Water ΔT"
+    id: hp_water_delta_t
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      if (isnan(id(hp_outlet_water_temp).state) || isnan(id(hp_inlet_water_temp).state)) return NAN;
+      return id(hp_outlet_water_temp).state - id(hp_inlet_water_temp).state;
+
+  - platform: template
+    name: "HP Thermal Power"
+    id: hp_thermal_power_kw
+    unit_of_measurement: "kW"
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      float dt = id(hp_water_delta_t).state;
+      if (isnan(dt)) return NAN;
+      float flow = id(hp_flow_lps).state;
+      return 4.18f * flow * dt;
+
+  - platform: template
+    name: "HP Electric Power"
+    id: hp_electric_power_kw
+    unit_of_measurement: "kW"
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      float v = id(hp_ac_voltage).state;
+      float i = id(hp_ac_current).state;
+      float pf = id(hp_power_factor).state;
+      if (isnan(v) || isnan(i) || isnan(pf)) return NAN;
+      return (v * i * pf) / 1000.0f;
+
+  - platform: template
+    name: "HP COP (Instant)"
+    id: hp_cop_instant
+    unit_of_measurement: ""
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      float q = id(hp_thermal_power_kw).state;
+      float p = id(hp_electric_power_kw).state;
+      if (isnan(q) || isnan(p) || p <= 0.05f) return NAN;
+      return q / p;
+    filters:
+      - clamp:
+          min_value: 0.0
+          max_value: 20.0
+
+  - platform: template
+    name: "HP COP (5min EMA)"
+    id: hp_cop_5min
+    unit_of_measurement: ""
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      float q = id(hp_thermal_power_kw).state;
+      float p = id(hp_electric_power_kw).state;
+      if (isnan(q) || isnan(p) || p <= 0.05f) return NAN;
+      return q / p;
+    filters:
+      - exponential_moving_average:
+          alpha: 0.065
+          send_every: 1
+      - clamp:
+          min_value: 0.0
+          max_value: 20.0
+
+# =======================
+# BINARY SENSORS (unificado)
+# =======================
+binary_sensor:
+  - platform: modbus_controller
+    name: "HP Interlock Switch"
+    id: hp_interlock_switch
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1211
+    bitmask: 0x0001
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Water Flow Switch"
+    id: hp_water_flow_switch
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1212
+    bitmask: 0x0001
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Fail: Ambient Temp Sensor"
+    id: hp_fail_amb_sensor
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1225
+    bitmask: 0x0001
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Fail: DHW Temp Sensor"
+    id: hp_fail_dhw_sensor
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1225
+    bitmask: 0x0002
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Fail: Outlet Temp Sensor"
+    id: hp_fail_outlet_sensor
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1225
+    bitmask: 0x0008
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Fail: Water Flow Protection"
+    id: hp_fail_water_flow_prot
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1225
+    bitmask: 0x2000
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Fail: EEPROM"
+    id: hp_fail_eeprom
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1225
+    bitmask: 0x4000
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Prot: Cooling Coil Anti-freeze"
+    id: hp_prot_coil_antifreeze
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1226
+    bitmask: 0x0040
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Prot: Water Flow"
+    id: hp_prot_water_flow
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1226
+    bitmask: 0x0100
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Prot: Cooling Water Too Low"
+    id: hp_prot_cooling_water_low
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1226
+    bitmask: 0x0200
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Prot: Outlet Temp Too High"
+    id: hp_prot_outlet_temp_high
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1226
+    bitmask: 0x0400
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Prot: First-class Anti-freeze"
+    id: hp_prot_first_antifreeze
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1226
+    bitmask: 0x2000
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP Prot: Secondary Anti-freeze"
+    id: hp_prot_secondary_antifreeze
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1226
+    bitmask: 0x4000
+    entity_category: diagnostic
+
+  - platform: modbus_controller
+    name: "HP 3-Way Valve (Cooling)"
+    id: hp_three_way_cooling
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1230
+    bitmask: 0x0001
+
+  - platform: modbus_controller
+    name: "HP 3-Way Valve (DHW)"
+    id: hp_three_way_dhw
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1231
+    bitmask: 0x0001
+
+  - platform: modbus_controller
+    name: "HP Aux Electric Heat Relay"
+    id: hp_aux_elec_heat_relay
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1233
+    bitmask: 0x0001
+
+  - platform: modbus_controller
+    name: "HP Circulation Pump Relay"
+    id: hp_circ_pump_relay
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1237
+    bitmask: 0x0001
+
+  - platform: modbus_controller
+    name: "HP DHW Running"
+    id: hp_dhw_running
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1240
+    bitmask: 0x0001
+
+  - platform: modbus_controller
+    name: "HP Heating Running"
+    id: hp_heating_running
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1241
+    bitmask: 0x0001
+
+  - platform: modbus_controller
+    name: "HP Cooling Running"
+    id: hp_cooling_running
+    modbus_controller_id: hp
+    register_type: holding
+    address: 1242
+    bitmask: 0x0001
+
+  - platform: modbus_controller
+    name: "HP Low Pressure Switch"
+    id: hp_low_pressure_switch
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5115
+    bitmask: 0x0800
+
+  - platform: modbus_controller
+    name: "HP High Pressure Switch"
+    id: hp_high_pressure_switch
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5115
+    bitmask: 0x1000
+
+  - platform: modbus_controller
+    name: "HP Defrosting"
+    id: hp_defrosting
+    modbus_controller_id: hp
+    register_type: holding
+    address: 5118
+    bitmask: 0x0001
+
+# =======================
+# TEXT SENSORS
+# =======================
+text_sensor:
+  - platform: template
+    name: "HP Mode"
+    id: hp_mode_text
+    update_interval: 10s
+    lambda: |-
+      uint16_t v = (uint16_t) id(hp_mode_raw).state;
+      uint8_t m = (uint8_t) (v & 0x0007);
+      switch (m) {
+        case 0: return std::string("Standby");
+        case 1: return std::string("Cooling");
+        case 2: return std::string("Heating");
+        case 3: return std::string("Hot Water");
+        case 4: return std::string("Forced Defrost");
+        case 5: return std::string("EEPROM Writing");
+        case 6: return std::string("Inspection");
+        default: return std::string("Reserved");
+      }
+
+  - platform: template
+    name: "HP Fault Summary"
+    id: hp_fault_summary
+    update_interval: 10s
+    lambda: |-
+      std::string s;
+      if (id(hp_fail_eeprom).state) s += "[EEPROM FAIL] ";
+      if (id(hp_fail_water_flow_prot).state) s += "[WATER FLOW PROT] ";
+      if (id(hp_prot_first_antifreeze).state) s += "[ANTIFREEZE#1] ";
+      if (id(hp_prot_secondary_antifreeze).state) s += "[ANTIFREEZE#2] ";
+      if (id(hp_defrosting).state) s += "[DEFROST] ";
+      if (s.empty()) s = "OK";
+      return s;
